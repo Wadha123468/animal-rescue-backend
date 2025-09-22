@@ -11,28 +11,27 @@ const router = express.Router();
 // IMPORTANT: Specific routes MUST come BEFORE parameterized routes
 // Place all specific routes (like 'my-profile') before routes with parameters (like ':id')
 
+// routes/ngos.js
+
 // @route   GET /api/ngos/my-profile
 // @desc    Get current NGO's profile
 // @access  Private (NGO only)
 router.get('/my-profile', auth, async (req, res) => {
   try {
-    console.log('🏢 Fetching NGO profile for user:', req.user.id, req.user.email);
-
     if (req.user.role !== 'ngo') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. NGO role required.'
-      });
+      return res.status(403).json({ success: false, message: 'NGO access required' });
     }
+
+    console.log('🏢 Fetching NGO profile for user:', req.user.id, req.user.email);
 
     const ngoProfile = await NGO.findOne({ user: req.user.id })
       .populate('user', 'name email phone')
       .lean();
 
     if (!ngoProfile) {
-      return res.status(404).json({
-        success: false,
-        message: 'NGO profile not found'
+      return res.status(404).json({ 
+        success: false, 
+        message: 'NGO profile not found' 
       });
     }
 
@@ -42,57 +41,80 @@ router.get('/my-profile', auth, async (req, res) => {
       success: true,
       ngoProfile
     });
-
   } catch (error) {
     console.error('❌ Get NGO profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch NGO profile',
-      error: error.message
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch NGO profile' 
+    });
+  }
+});
+
+// @route   POST /api/ngos/my-profile
+// @desc    Create new NGO profile
+// @access  Private (NGO only)
+router.post('/my-profile', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'ngo') {
+      return res.status(403).json({ success: false, message: 'NGO access required' });
+    }
+
+    // Check if profile already exists
+    const existingProfile = await NGO.findOne({ user: req.user.id });
+    if (existingProfile) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'NGO profile already exists. Use PUT to update.' 
+      });
+    }
+
+    console.log('🆕 Creating NGO profile for user:', req.user.email);
+
+    const ngoProfile = new NGO({
+      user: req.user.id,
+      ...req.body,
+      statistics: {
+        totalRescues: 0,
+        successfulRescues: 0,
+        rating: 5.0
+      }
+    });
+
+    await ngoProfile.save();
+
+    console.log('✅ NGO profile created:', ngoProfile.organizationName);
+
+    res.status(201).json({
+      success: true,
+      message: 'NGO profile created successfully',
+      ngoProfile
+    });
+  } catch (error) {
+    console.error('❌ Create NGO profile error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to create NGO profile',
+      error: error.message 
     });
   }
 });
 
 // @route   PUT /api/ngos/my-profile
-// @desc    Update current NGO's profile
+// @desc    Update NGO profile
 // @access  Private (NGO only)
 router.put('/my-profile', auth, async (req, res) => {
   try {
     if (req.user.role !== 'ngo') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. NGO role required.'
-      });
+      return res.status(403).json({ success: false, message: 'NGO access required' });
     }
 
-    const { description, website, capacity, specialties, facilities } = req.body;
-    
-    const ngoProfile = await NGO.findOne({ user: req.user.id });
-    if (!ngoProfile) {
-      return res.status(404).json({
-        success: false,
-        message: 'NGO profile not found'
-      });
-    }
+    console.log('🔄 Updating NGO profile for user:', req.user.email);
 
-    // Update fields
-    if (description !== undefined) ngoProfile.description = description.trim();
-    if (website !== undefined) ngoProfile.website = website || undefined;
-    if (specialties && Array.isArray(specialties)) ngoProfile.specialties = specialties;
-    if (facilities && Array.isArray(facilities)) ngoProfile.facilities = facilities;
-    
-    if (capacity && capacity.total) {
-      const newTotal = parseInt(capacity.total);
-      const currentAnimals = ngoProfile.capacity?.current || 0;
-      
-      ngoProfile.capacity = {
-        total: newTotal,
-        current: currentAnimals,
-        available: Math.max(0, newTotal - currentAnimals)
-      };
-    }
-
-    await ngoProfile.save();
+    const ngoProfile = await NGO.findOneAndUpdate(
+      { user: req.user.id },
+      { $set: req.body },
+      { new: true, upsert: true }
+    );
 
     console.log('✅ NGO profile updated:', ngoProfile.organizationName);
 
@@ -101,16 +123,16 @@ router.put('/my-profile', auth, async (req, res) => {
       message: 'NGO profile updated successfully',
       ngoProfile
     });
-
   } catch (error) {
     console.error('❌ Update NGO profile error:', error);
-    res.status(500).json({
-      success: false,
+    res.status(500).json({ 
+      success: false, 
       message: 'Failed to update NGO profile',
-      error: error.message
+      error: error.message 
     });
   }
 });
+
 
 
 // @route   PUT /api/ngos/my-profile

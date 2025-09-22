@@ -799,6 +799,60 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 
+// @route   PUT /api/rescues/:id/assign
+// @desc    Assign a rescue to current NGO
+// @access  Private (NGO only)
+router.put('/:id/assign', auth, async (req, res) => {
+  try {
+    const rescueId = req.params.id;
+
+    // Validate ID
+    if (!rescueId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ success: false, message: 'Invalid rescue ID' });
+    }
+
+    // Ensure user is an NGO
+    if (req.user.role !== 'ngo') {
+      return res.status(403).json({ success: false, message: 'NGO role required' });
+    }
+
+    // Find NGO profile
+    const ngoProfile = await NGO.findOne({ user: req.user.id });
+    if (!ngoProfile) {
+      return res.status(404).json({ success: false, message: 'NGO profile not found' });
+    }
+
+    // Assign rescue if still reported
+    const rescue = await Rescue.findById(rescueId);
+    if (!rescue) {
+      return res.status(404).json({ success: false, message: 'Rescue not found' });
+    }
+    if (rescue.assignedNGO) {
+      return res.status(400).json({ success: false, message: 'Already assigned' });
+    }
+
+    rescue.assignedNGO = ngoProfile._id;
+    rescue.status = 'assigned';
+    rescue.timeline.push({
+      event: 'Assigned to NGO',
+      description: `Assigned to ${ngoProfile.organizationName}`,
+      timestamp: new Date(),
+      updatedBy: req.user.id
+    });
+    await rescue.save();
+
+    // Return updated rescue
+    const populated = await Rescue.findById(rescueId)
+      .populate('reporter', 'name email')
+      .populate('assignedNGO', 'organizationName')
+      .lean();
+
+    res.json({ success: true, rescue: populated });
+  } catch (error) {
+    console.error('Assign rescue error:', error);
+    res.status(500).json({ success: false, message: 'Failed to assign rescue' });
+  }
+});
 
 // @route   PUT /api/rescues/:id/accept
 // @desc    Accept rescue case (NGO only)
@@ -890,108 +944,53 @@ router.put('/:id/accept', auth, async (req, res) => {
 });
 
 // @route   PUT /api/rescues/:id/status
-// @desc    Update rescue status with notifications
-// @access  Private
-router.put('/:id/status', [
-  auth,
-  body('status').isIn(['REPORTED', 'ASSIGNED', 'IN_PROGRESS', 'RESCUED', 'COMPLETED', 'CANCELLED']).withMessage('Invalid status'),
-  body('message').optional().trim().isLength({ max: 500 }).withMessage('Message too long')
-], async (req, res) => {
+// @desc    Update rescue status
+// @access  Private (NGO only)
+router.put('/:id/status', auth, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
+    const { id } = req.params;
+    const { status, description } = req.body;
+
+    // Validate inputs
+    const validStatuses = ['reported', 'assigned', 'in_progress', 'rescued', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
     }
 
-    const { status, message } = req.body;
-    
-    const rescue = await Rescue.findById(req.params.id)
-      .populate('reportedBy', 'name email')
-      .populate('assignedNGO', 'organizationName user');
-
+    // Find rescue
+    const rescue = await Rescue.findById(id);
     if (!rescue) {
-      return res.status(404).json({
-        success: false,
-        message: 'Rescue not found'
-      });
+      return res.status(404).json({ success: false, message: 'Rescue not found' });
     }
 
-    // Check permissions
-    const isOwner = rescue.reportedBy?._id?.toString() === req.user.id;
-    const isAdmin = req.user.role === 'admin';
-    let isAssignedNGO = false;
-
+    // Permission check - only assigned NGO can update status
     if (req.user.role === 'ngo') {
       const ngoProfile = await NGO.findOne({ user: req.user.id });
-      isAssignedNGO = rescue.assignedNGO?._id?.toString() === ngoProfile?._id?.toString();
+      if (!ngoProfile || rescue.assignedNGO?.toString() !== ngoProfile._id.toString()) {
+        return res.status(403).json({ success: false, message: 'Not authorized to update this rescue' });
+      }
+    } else if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    if (!isOwner && !isAdmin && !isAssignedNGO) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
-    }
-
-    const previousStatus = rescue.status;
+    // Update rescue
     rescue.status = status;
-    
-    if (message) {
-      if (!rescue.updates) rescue.updates = [];
-      rescue.updates.push({
-        message: message.trim(),
-        updatedBy: req.user.id,
-        updatedAt: new Date(),
-        status: status
-      });
-    }
+    rescue.timeline.push({
+      event: 'Status Updated',
+      description: description || `Status changed to ${status}`,
+      timestamp: new Date(),
+      updatedBy: req.user.id
+    });
 
     await rescue.save();
 
-    console.log('✅ Rescue status updated:', rescue._id, 'from', previousStatus, 'to', status);
-
-    // Send status update email to reporter (if not the one updating)
-    if (rescue.reportedBy && rescue.reportedBy.email && rescue.reportedBy._id.toString() !== req.user.id) {
-      try {
-        await sendEmail({
-          to: rescue.reportedBy.email,
-          template: 'statusUpdate',
-          data: {
-            reporterName: rescue.reportedBy.name,
-            rescueTitle: rescue.title,
-            animalType: rescue.animalType,
-            oldStatus: previousStatus,
-            newStatus: status,
-            updateMessage: message,
-            assignedNGO: rescue.assignedNGO?.organizationName,
-            rescueUrl: `${process.env.FRONTEND_URL}/rescues/${rescue._id}`
-          }
-        });
-        console.log('✅ Status update email sent to reporter');
-      } catch (emailError) {
-        console.error('❌ Failed to send status update email:', emailError);
-      }
-    }
-
-    res.json({
-      success: true,
-      message: 'Rescue status updated successfully',
-      rescue
-    });
-
+    res.json({ success: true, rescue });
   } catch (error) {
-    console.error('❌ Update rescue status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update rescue status',
-      error: error.message
-    });
+    console.error('Status update error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update status' });
   }
 });
+
 
 // @route   PUT /api/rescues/:id/cancel
 // @desc    Cancel rescue case
