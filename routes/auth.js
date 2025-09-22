@@ -404,13 +404,32 @@ router.post('/login', [
   }
 });
 
+
 // @route   GET /api/auth/me
 // @desc    Get current user
 // @access  Private
-router.get('/me', auth, async (req, res) => {
+router.put('/change-password', auth, [
+  body('currentPassword', 'Current password is required').exists(),
+  body('newPassword', 'New password must be at least 6 characters').isLength({ min: 6 })
+], async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
-    
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+
+    console.log('🔐 Password change request for user:', req.user.email);
+
+    // Find user
+    const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -418,17 +437,66 @@ router.get('/me', auth, async (req, res) => {
       });
     }
 
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      console.log('❌ Current password incorrect for user:', req.user.email);
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    await User.findByIdAndUpdate(userId, {
+      password: hashedPassword,
+      updatedAt: new Date()
+    });
+
+    console.log('✅ Password changed successfully for user:', req.user.email);
+
     res.json({
       success: true,
-      user
+      message: 'Password changed successfully'
     });
+
   } catch (error) {
-    console.error('❌ Get user error:', error);
+    console.error('❌ Change password error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error occurred while changing password'
     });
+  }
+});
+
+// @route   POST /api/auth/reset-password
+// @desc    Reset password using token
+// @access  Public (via token)
+router.post('/reset-password', async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ success: false, message: 'Token and password required' });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded || !decoded.user || !decoded.user.id) 
+      return res.status(400).json({ success: false, message: 'Invalid token' });
+
+    const user = await User.findById(decoded.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
+
+    await user.save();
+
+    res.json({ success: true, message: 'Password has been reset successfully.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
   }
 });
 

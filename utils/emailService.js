@@ -652,7 +652,50 @@ accountDeleted: (data) => ({
     </body>
     </html>
   `
+}),
+
+passwordReset: (data) => ({
+  subject: data.subject || '🔒 Password Reset Request',
+  html: `
+    <!DOCTYPE html>
+    <html>
+    <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f5f5f5;">
+      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+        <!-- Header -->
+        <div style="background-color: #007BFF; padding: 20px; color: #ffffff; text-align: center;">
+          <h1>Password Reset Request</h1>
+        </div>
+
+        <div style="padding: 40px 30px;">
+          <h2 style="color: #333; margin-top: 0; font-size: 24px;">Hello ${data.userName},</h2>
+
+          <p style="color: #666; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+            We received a request to reset your password for your Animal Rescue Platform account.
+            Click the button below to reset your password. This link will expire in 1 hour.
+          </p>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${process.env.FRONTEND_URL}/reset-password?token=${data.resetUrl}" target="_blank"
+              style="background-color: #007BFF; color: white; padding: 15px 30px; text-decoration: none; border-radius: 4px; font-weight: bold;">
+              Reset Password
+            </a>
+          </div>
+
+          <p style="color: #666; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+            If you did not request a password reset, please ignore this email, and your password will remain unchanged.
+          </p>
+
+          <p style="color: #666; font-size: 16px; line-height: 1.6;">
+            Thank you,<br />
+            Animal Rescue Platform Team
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
 })
+
 
 };
 
