@@ -12,12 +12,12 @@ const router = express.Router();
 // Place all specific routes (like 'my-profile') before routes with parameters (like ':id')
 
 // @route   GET /api/ngos/my-profile
-// @desc    Get current user's NGO profile
+// @desc    Get current NGO's profile
 // @access  Private (NGO only)
 router.get('/my-profile', auth, async (req, res) => {
   try {
     console.log('🏢 Fetching NGO profile for user:', req.user.id, req.user.email);
-    
+
     if (req.user.role !== 'ngo') {
       return res.status(403).json({
         success: false,
@@ -25,33 +25,93 @@ router.get('/my-profile', auth, async (req, res) => {
       });
     }
 
-    const ngo = await NGO.findOne({ user: req.user.id })
-      .populate('user', 'name email phone');
+    const ngoProfile = await NGO.findOne({ user: req.user.id })
+      .populate('user', 'name email phone')
+      .lean();
 
-    if (!ngo) {
-      console.log('❌ NGO profile not found for user:', req.user.id);
+    if (!ngoProfile) {
       return res.status(404).json({
         success: false,
-        message: 'NGO profile not found. Please complete your NGO registration.'
+        message: 'NGO profile not found'
       });
     }
 
-    console.log('✅ NGO profile found:', ngo.organizationName);
-    
+    console.log('✅ NGO profile found:', ngoProfile.organizationName);
+
     res.json({
       success: true,
-      ngo
+      ngoProfile
     });
 
   } catch (error) {
     console.error('❌ Get NGO profile error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
+      message: 'Failed to fetch NGO profile',
       error: error.message
     });
   }
 });
+
+// @route   PUT /api/ngos/my-profile
+// @desc    Update current NGO's profile
+// @access  Private (NGO only)
+router.put('/my-profile', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'ngo') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. NGO role required.'
+      });
+    }
+
+    const { description, website, capacity, specialties, facilities } = req.body;
+    
+    const ngoProfile = await NGO.findOne({ user: req.user.id });
+    if (!ngoProfile) {
+      return res.status(404).json({
+        success: false,
+        message: 'NGO profile not found'
+      });
+    }
+
+    // Update fields
+    if (description !== undefined) ngoProfile.description = description.trim();
+    if (website !== undefined) ngoProfile.website = website || undefined;
+    if (specialties && Array.isArray(specialties)) ngoProfile.specialties = specialties;
+    if (facilities && Array.isArray(facilities)) ngoProfile.facilities = facilities;
+    
+    if (capacity && capacity.total) {
+      const newTotal = parseInt(capacity.total);
+      const currentAnimals = ngoProfile.capacity?.current || 0;
+      
+      ngoProfile.capacity = {
+        total: newTotal,
+        current: currentAnimals,
+        available: Math.max(0, newTotal - currentAnimals)
+      };
+    }
+
+    await ngoProfile.save();
+
+    console.log('✅ NGO profile updated:', ngoProfile.organizationName);
+
+    res.json({
+      success: true,
+      message: 'NGO profile updated successfully',
+      ngoProfile
+    });
+
+  } catch (error) {
+    console.error('❌ Update NGO profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update NGO profile',
+      error: error.message
+    });
+  }
+});
+
 
 // @route   PUT /api/ngos/my-profile
 // @desc    Update NGO profile
@@ -348,5 +408,7 @@ router.put('/:id/reject', [auth, authorize('admin')], async (req, res) => {
     });
   }
 });
+
+
 
 module.exports = router;
