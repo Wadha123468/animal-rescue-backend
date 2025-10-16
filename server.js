@@ -101,6 +101,7 @@ const uploadRoutes = require('./routes/upload');
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
 const notFound = require('./middleware/notFound');
+const exportRoutes = require('./routes/exports');
 
 // API Routes
 // Add this line with other route registrations
@@ -111,6 +112,7 @@ app.use('/api/rescues', rescueRoutes);
 app.use('/api/ngos', ngoRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/exports', exportRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

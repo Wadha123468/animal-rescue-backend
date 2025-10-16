@@ -41,6 +41,9 @@ const rescueSchema = new mongoose.Schema({
   },
   location: {
     address: String,
+        city: String,        // Add this field
+    state: String,       // Add this field
+    landmark: String,
     description: String,
     coordinates: {
       latitude: Number,

@@ -284,7 +284,7 @@ router.get('/my-assignments', auth, async (req, res) => {
 
 
 // @route   POST /api/rescues
-// @desc    Create a new rescue case - FIXED FOR YOUR DATA STRUCTURE
+// @desc    Create a new rescue case - FIXED FOR AI PREDICTION
 // @access  Private
 router.post('/', auth, async (req, res) => {
   try {
@@ -342,11 +342,34 @@ router.post('/', auth, async (req, res) => {
       });
     }
 
+    // Process AI prediction data properly
+    let processedAiPrediction = null;
+    if (animal.aiPrediction) {
+      processedAiPrediction = {
+        species: animal.aiPrediction.species || 'Unknown',
+        confidence: Number(animal.aiPrediction.confidence) || 0,
+        timestamp: animal.aiPrediction.timestamp || new Date().toISOString(),
+        modelInfo: animal.aiPrediction.modelInfo || { architecture: 'MobileNetV2', source: 'trained_model' },
+        suggestions: animal.aiPrediction.suggestions || [],
+        medicalAssessment: animal.aiPrediction.medicalAssessment || ''
+      };
+      console.log('🤖 AI Prediction processed:', processedAiPrediction);
+    }
+
+    // Fix coordinates structure to match your schema
+    let coordinates = { latitude: null, longitude: null };
+    if (location.coordinates) {
+      coordinates = {
+        latitude: location.coordinates.lat || null,
+        longitude: location.coordinates.lng || null
+      };
+    }
+
     // Prepare rescue data according to your schema
     const rescueData = {
       title: title.trim(),
       description: description.trim(),
-      reporter: req.user.id, // Your schema uses 'reporter' not 'reportedBy'
+      reporter: req.user.id,
       
       // Animal data structure matching your schema
       animal: {
@@ -355,7 +378,9 @@ router.post('/', auth, async (req, res) => {
         gender: animal.gender || 'unknown',
         size: animal.size || 'medium',
         color: animal.color || '',
-        medicalCondition: animal.medicalCondition || ''
+        medicalCondition: animal.medicalCondition || '',
+        // Store AI prediction in animal object for easier access
+        aiPrediction: processedAiPrediction
       },
       
       // Location data structure matching your schema
@@ -364,16 +389,23 @@ router.post('/', auth, async (req, res) => {
         city: location.city || '',
         state: location.state || '',
         zipCode: location.zipCode || '',
-        coordinates: location.coordinates || { latitude: null, longitude: null },
+        coordinates: coordinates, // Fixed structure
         landmark: location.landmark || '',
         description: location.description || `${location.address || ''} ${location.city || ''}`.trim()
       },
       
       urgency: urgency,
-      status: 'reported', // Your schema uses lowercase
+      status: 'reported',
       assignedNGO: null,
       
-      images: images || [],
+      images: images.map(img => ({
+        url: img.url,
+        filename: img.filename || img.name || 'image.jpg',
+        description: img.description || `${animal.type} rescue image`,
+        size: img.size || 0,
+        uploadedAt: new Date()
+      })),
+      
       tags: tags || [],
       priority: urgency === 'critical' ? 10 : urgency === 'high' ? 8 : urgency === 'medium' ? 5 : 3,
       isPublic: true,
@@ -381,31 +413,36 @@ router.post('/', auth, async (req, res) => {
       // Timeline entry
       timeline: [{
         event: 'Rescue Reported',
-        description: `Rescue case reported by ${user.name}`,
+        description: `Rescue case reported by ${user.name}${processedAiPrediction ? ` - AI classified as ${processedAiPrediction.species} (${Math.round(processedAiPrediction.confidence * 100)}% confidence)` : ''}`,
         timestamp: new Date(),
         updatedBy: req.user.id
-      }],
-
-      // AI prediction if provided
-      aiPrediction: animal.aiPrediction || {
-        confidence: 0,
-        suggestions: [],
-        medicalAssessment: ''
-      }
+      }]
     };
 
-    console.log('🔄 Processed rescue data:', JSON.stringify(rescueData, null, 2));
+    console.log('🔄 Processed rescue data:', JSON.stringify({
+      ...rescueData,
+      images: rescueData.images.map(img => ({ ...img, url: `${img.url?.substring(0, 50)}...` })) // Log truncated URLs
+    }, null, 2));
 
     // Create the rescue
     const rescue = new Rescue(rescueData);
     await rescue.save();
 
     console.log('✅ Rescue created successfully:', rescue._id);
+    console.log('🤖 AI Classification saved:', rescue.animal?.aiPrediction?.species || 'None');
 
     // Populate the rescue for response
     const populatedRescue = await Rescue.findById(rescue._id)
       .populate('reporter', 'name email phone')
       .lean();
+
+    // Add notification for nearby NGOs (optional)
+    try {
+      // You can add NGO notification logic here
+      console.log('📢 Notifying nearby NGOs...');
+    } catch (notifyError) {
+      console.log('⚠️ NGO notification failed:', notifyError.message);
+    }
 
     res.status(201).json({
       success: true,
@@ -436,6 +473,7 @@ router.post('/', auth, async (req, res) => {
     });
   }
 });
+
 
 
 // @route   GET /api/rescues
